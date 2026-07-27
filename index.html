@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>벽돌깨기 | Breakout</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #fff;
+      user-select: none;
+    }
+
+    #stats {
+      display: flex;
+      gap: 40px;
+      padding: 10px 20px;
+      margin-bottom: 8px;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 22px;
+      font-weight: bold;
+      color: #fff;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    #score-val   { color: #f1c40f; }
+    #level-val   { color: #74b9ff; }
+    #lives-val   { color: #e17055; letter-spacing: 3px; }
+    #hiscore-val { color: #a29bfe; }
+
+    canvas {
+      display: block;
+      border: 1px solid #1a1a3a;
+      border-radius: 4px;
+      cursor: none;
+    }
+
+    #hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #444;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="stats">
+  <div class="stat-item">
+    <span class="stat-label">점수</span>
+    <span class="stat-value" id="score-val">0</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-label">레벨</span>
+    <span class="stat-value" id="level-val">1 / 5</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-label">생명</span>
+    <span class="stat-value" id="lives-val">♥♥♥</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-label">최고점수</span>
+    <span class="stat-value" id="hiscore-val">0</span>
+  </div>
+</div>
+
+<canvas id="c" width="780" height="520"></canvas>
+<div id="hint">마우스로 패들 이동 &nbsp;|&nbsp; 클릭 / 스페이스바로 공 발사 &nbsp;|&nbsp; P : 일시정지</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width;   // 780
+const H = canvas.height;  // 520
+
+const PAD_H   = 12;
+const PAD_Y   = H - 48;
+const BALL_R  = 8;
+const MAX_LIVES = 3;
+const TOTAL_LEVELS = 5;
+
+// Brick layout
+const B_COLS    = 11;
+const B_ROWS    = 7;
+const B_W       = 60;
+const B_H       = 18;
+const B_GAP_X   = 8;
+const B_GAP_Y   = 5;
+const B_OFF_X   = (W - (B_COLS * (B_W + B_GAP_X) - B_GAP_X)) / 2;
+const B_OFF_Y   = 60;
+
+// Brick type definitions: [maxHits, fillColor, shadColor, points]
+const BT = [
+  null,
+  [1, '#e74c3c','#922b21',  10],  // 1  Red       (1-hit)
+  [1, '#e67e22','#a04000',  20],  // 2  Orange    (1-hit)
+  [1, '#f1c40f','#b7950b',  30],  // 3  Yellow    (1-hit)
+  [2, '#27ae60','#1a7040',  45],  // 4  Green     (2-hit)
+  [2, '#2980b9','#1a5276',  55],  // 5  Blue      (2-hit)
+  [3, '#8e44ad','#5b2c6f',  80],  // 6  Purple    (3-hit)
+];
+
+// ─── 5 Level grids (0 = empty, 1-6 = brick type) ─────────────────
+const LEVEL_DATA = [
+  { speed: 4.2, grid: [
+    [0,0,1,1,2,2,2,1,1,0,0],
+    [0,1,1,2,2,3,2,2,1,1,0],
+    [1,1,2,2,3,3,3,2,2,1,1],
+    [1,2,2,3,3,3,3,3,2,2,1],
+    [1,1,2,2,3,3,3,2,2,1,1],
+    [0,1,1,2,2,3,2,2,1,1,0],
+    [0,0,1,1,2,2,2,1,1,0,0],
+  ]},
+  { speed: 4.8, grid: [
+    [2,2,2,2,2,2,2,2,2,2,2],
+    [2,3,3,3,3,3,3,3,3,3,2],
+    [2,3,4,4,4,4,4,4,4,3,2],
+    [2,3,4,4,4,4,4,4,4,3,2],
+    [2,3,4,4,4,4,4,4,4,3,2],
+    [2,3,3,3,3,3,3,3,3,3,2],
+    [2,2,2,2,2,2,2,2,2,2,2],
+  ]},
+  { speed: 5.4, grid: [
+    [5,4,3,2,1,2,1,2,3,4,5],
+    [4,5,4,3,2,3,2,3,4,5,4],
+    [3,4,5,4,3,4,3,4,5,4,3],
+    [2,3,4,5,4,5,4,5,4,3,2],
+    [3,4,5,4,3,4,3,4,5,4,3],
+    [4,5,4,3,2,3,2,3,4,5,4],
+    [5,4,3,2,1,2,1,2,3,4,5],
+  ]},
+  { speed: 5.9, grid: [
+    [6,5,4,3,2,1,2,3,4,5,6],
+    [5,6,5,4,3,2,3,4,5,6,5],
+    [4,5,6,5,4,3,4,5,6,5,4],
+    [3,4,5,6,5,4,5,6,5,4,3],
+    [4,5,6,5,4,3,4,5,6,5,4],
+    [5,6,5,4,3,2,3,4,5,6,5],
+    [6,5,4,3,2,1,2,3,4,5,6],
+  ]},
+  { speed: 6.5, grid: [
+    [6,6,6,6,6,6,6,6,6,6,6],
+    [6,5,5,5,5,5,5,5,5,5,6],
+    [6,5,6,6,6,6,6,6,6,5,6],
+    [6,5,6,5,5,6,5,5,6,5,6],
+    [6,5,6,6,6,6,6,6,6,5,6],
+    [6,5,5,5,5,5,5,5,5,5,6],
+    [6,6,6,6,6,6,6,6,6,6,6],
+  ]},
+];
+
+// ═══════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════
+let state, score, highScore, lives, levelIdx;
+let bricks, ball, padX, padW;
+let launched;
+let particles = [];
+let keys = {};
+let mouseX = W / 2;
+
+highScore = parseInt(localStorage.getItem('bbHigh') || '0');
+
+// ═══════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════
+function initGame() {
+  score    = 0;
+  lives    = MAX_LIVES;
+  levelIdx = 0;
+  initLevel();
+  state = 'playing';
+  updateHUD();
+}
+
+function initLevel() {
+  const lv = LEVEL_DATA[levelIdx];
+  padW  = 100;
+  padX  = W / 2 - padW / 2;
+  launched = false;
+  particles = [];
+
+  bricks = [];
+  for (let r = 0; r < B_ROWS; r++) {
+    for (let c = 0; c < B_COLS; c++) {
+      const t = lv.grid[r][c];
+      if (!t) continue;
+      bricks.push({
+        x: B_OFF_X + c * (B_W + B_GAP_X),
+        y: B_OFF_Y + r * (B_H + B_GAP_Y),
+        w: B_W, h: B_H,
+        type: t,
+        hp: BT[t][0],
+        maxHp: BT[t][0],
+        alive: true
+      });
+    }
+  }
+  spawnBall();
+}
+
+function spawnBall() {
+  const spd = LEVEL_DATA[levelIdx].speed;
+  ball = {
+    x: padX + padW / 2,
+    y: PAD_Y - BALL_R - 2,
+    vx: 0, vy: -spd,
+    spd
+  };
+  launched = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UPDATE
+// ═══════════════════════════════════════════════════════════════════
+function update() {
+  if (state !== 'playing') return;
+
+  // Paddle follow mouse; clamp
+  padX = Math.min(W - padW, Math.max(0, mouseX - padW / 2));
+  if (keys['ArrowLeft'])  padX = Math.max(0, padX - 7);
+  if (keys['ArrowRight']) padX = Math.min(W - padW, padX + 7);
+
+  if (!launched) {
+    ball.x = padX + padW / 2;
+    ball.y = PAD_Y - BALL_R - 2;
+    return;
+  }
+
+  // Move ball
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // Wall bounce
+  if (ball.x - BALL_R < 0)   { ball.x = BALL_R;   ball.vx *= -1; }
+  if (ball.x + BALL_R > W)   { ball.x = W-BALL_R; ball.vx *= -1; }
+  if (ball.y - BALL_R < 0)   { ball.y = BALL_R;   ball.vy *= -1; }
+
+  // Paddle bounce
+  if (
+    ball.vy > 0 &&
+    ball.y + BALL_R >= PAD_Y &&
+    ball.y - BALL_R <= PAD_Y + PAD_H &&
+    ball.x >= padX &&
+    ball.x <= padX + padW
+  ) {
+    const hit = (ball.x - padX) / padW; // 0..1
+    const ang = (hit - 0.5) * Math.PI * 0.7; // ±63°
+    const spd = ball.spd;
+    ball.vx = Math.sin(ang) * spd;
+    ball.vy = -Math.abs(Math.cos(ang) * spd);
+    ball.y  = PAD_Y - BALL_R;
+  }
+
+  // Brick collision
+  brickCollision();
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.12;
+    p.life -= 1;
+    p.alpha = p.life / p.maxLife;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Ball lost
+  if (ball.y - BALL_R > H) {
+    lives--;
+    if (lives <= 0) {
+      saveHigh();
+      state = 'gameover';
+    } else {
+      spawnBall();
+    }
+    updateHUD();
+    return;
+  }
+
+  // Level clear
+  if (bricks.every(b => !b.alive)) {
+    if (levelIdx + 1 >= TOTAL_LEVELS) {
+      saveHigh();
+      state = 'win';
+    } else {
+      state = 'levelclear';
+    }
+  }
+}
+
+function brickCollision() {
+  for (const b of bricks) {
+    if (!b.alive) continue;
+
+    // Nearest point on brick to ball center
+    const nx = Math.max(b.x, Math.min(ball.x, b.x + b.w));
+    const ny = Math.max(b.y, Math.min(ball.y, b.y + b.h));
+    const dx = ball.x - nx;
+    const dy = ball.y - ny;
+    if (dx*dx + dy*dy >= BALL_R * BALL_R) continue;
+
+    // Hit
+    b.hp--;
+    score += BT[b.type][3] * (levelIdx + 1);
+    if (b.hp <= 0) {
+      b.alive = false;
+      spawnParticles(b);
+    }
+    updateHUD();
+
+    // Determine bounce axis
+    const overX = ball.x < b.x ? ball.x - b.x : ball.x - (b.x + b.w);
+    const overY = ball.y < b.y ? ball.y - b.y : ball.y - (b.y + b.h);
+    if (Math.abs(overX) < Math.abs(overY)) ball.vx *= -1;
+    else                                    ball.vy *= -1;
+    break;
+  }
+}
+
+function spawnParticles(b) {
+  const color = BT[b.type][1];
+  for (let i = 0; i < 8; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 1.5 + Math.random() * 2;
+    particles.push({
+      x: b.x + b.w / 2, y: b.y + b.h / 2,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1,
+      size: 3 + Math.random() * 3,
+      color,
+      life: 24 + Math.random() * 16,
+      maxLife: 40,
+      alpha: 1
+    });
+  }
+}
+
+function saveHigh() {
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('bbHigh', highScore);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  DRAW
+// ═══════════════════════════════════════════════════════════════════
+function draw() {
+  // BG
+  ctx.fillStyle = '#0f0f23';
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'menu') {
+    drawMenu(); return;
+  }
+
+  drawBricks();
+  drawParticles();
+  drawPaddle();
+  drawBall();
+
+  if (!launched && state === 'playing') {
+    drawCenteredText('클릭 또는 스페이스바로 발사', W/2, H - 16, '#555', 13);
+  }
+
+  if (state === 'paused')     drawOverlay('일시 정지', '', 'P 또는 스페이스바로 재개');
+  if (state === 'levelclear') drawOverlay(`레벨 ${levelIdx + 1} 완료!`, `점수: ${score.toLocaleString()}`, '스페이스바로 다음 레벨');
+  if (state === 'gameover')   drawOverlay('GAME OVER', `최종 점수: ${score.toLocaleString()}`, '스페이스바로 다시 시작');
+  if (state === 'win')        drawOverlay('🎉 전체 클리어!', `최종 점수: ${score.toLocaleString()}`, '스페이스바로 처음부터');
+}
+
+function drawMenu() {
+  // Title
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 72px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('벽돌깨기', W/2, 160);
+
+  ctx.font = '18px Arial';
+  ctx.fillStyle = '#555';
+  ctx.fillText('BREAKOUT', W/2, 195);
+
+  // High score
+  ctx.font = 'bold 20px Arial';
+  ctx.fillStyle = '#a29bfe';
+  ctx.fillText(`최고 점수: ${highScore.toLocaleString()}`, W/2, 255);
+
+  // Controls
+  ctx.font = '16px Arial';
+  ctx.fillStyle = '#888';
+  ctx.fillText('마우스 또는 ← → 키로 패들 이동', W/2, 330);
+  ctx.fillText('클릭 / 스페이스바로 공 발사', W/2, 358);
+  ctx.fillText('P 키로 일시정지', W/2, 386);
+
+  // Level info row
+  const colors = ['#e74c3c','#e67e22','#f1c40f','#27ae60','#2980b9','#8e44ad'];
+  const labels = ['1hit','1hit','1hit','2hit','2hit','3hit'];
+  const bx0 = W/2 - colors.length/2*54 + 4;
+  ctx.font = '11px Arial';
+  colors.forEach((c, i) => {
+    const bx = bx0 + i * 54;
+    ctx.fillStyle = c;
+    roundRect(ctx, bx, 430, 46, 16, 3);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText(labels[i], bx + 23, 442);
+  });
+
+  // Start button
+  drawButton(W/2, 500, '게임 시작  ▶', '#2980b9', '#1a5276');
+
+  ctx.font = '13px Arial';
+  ctx.fillStyle = '#444';
+  ctx.fillText(`총 ${TOTAL_LEVELS}개 레벨`, W/2, 545);
+}
+
+function drawBricks() {
+  for (const b of bricks) {
+    if (!b.alive) continue;
+    const [, fill, shad] = BT[b.type];
+    const ratio = b.hp / b.maxHp;
+
+    ctx.globalAlpha = 0.6 + 0.4 * ratio;
+
+    // Body
+    ctx.fillStyle = fill;
+    roundRect(ctx, b.x, b.y, b.w, b.h, 3);
+    ctx.fill();
+
+    // Shadow bottom
+    ctx.fillStyle = shad;
+    roundRect(ctx, b.x + 1, b.y + b.h * 0.55, b.w - 2, b.h * 0.43, [0,0,3,3]);
+    ctx.fill();
+
+    // Shine top
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    roundRect(ctx, b.x + 2, b.y + 2, b.w - 4, b.h * 0.38, [3,3,0,0]);
+    ctx.fill();
+
+    // HP dots for multi-hit
+    if (b.maxHp > 1) {
+      ctx.globalAlpha = 1;
+      const dotR = 2.5;
+      const totalDots = b.maxHp;
+      const spacing = 8;
+      const startX = b.x + b.w/2 - (totalDots-1)*spacing/2;
+      for (let d = 0; d < totalDots; d++) {
+        ctx.beginPath();
+        ctx.arc(startX + d * spacing, b.y + b.h/2, dotR, 0, Math.PI*2);
+        ctx.fillStyle = d < b.hp ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.4)';
+        ctx.fill();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.rect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPaddle() {
+  const g = ctx.createLinearGradient(padX, PAD_Y, padX, PAD_Y + PAD_H);
+  g.addColorStop(0, '#74b9ff');
+  g.addColorStop(1, '#0984e3');
+  ctx.fillStyle = g;
+  roundRect(ctx, padX, PAD_Y, padW, PAD_H, 6);
+  ctx.fill();
+
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  roundRect(ctx, padX + 5, PAD_Y + 2, padW - 10, 4, 2);
+  ctx.fill();
+}
+
+function drawBall() {
+  // Glow
+  const grd = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, BALL_R * 3);
+  grd.addColorStop(0, 'rgba(255,255,255,0.2)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, BALL_R * 3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
+  ctx.fill();
+
+  // Specular
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.arc(ball.x - BALL_R*0.3, ball.y - BALL_R*0.3, BALL_R*0.35, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawOverlay(title, subtitle, hint) {
+  ctx.fillStyle = 'rgba(0,0,10,0.78)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 54px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(title, W/2, H/2 - 55);
+
+  if (subtitle) {
+    ctx.font = '26px Arial';
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillText(subtitle, W/2, H/2 + 4);
+  }
+
+  if (hint) {
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#888';
+    ctx.fillText(hint, W/2, H/2 + 60);
+  }
+}
+
+function drawButton(cx, cy, label, colorTop, colorBot) {
+  const bw = 210, bh = 52;
+  const g = ctx.createLinearGradient(cx-bw/2, cy-bh/2, cx-bw/2, cy+bh/2);
+  g.addColorStop(0, colorTop);
+  g.addColorStop(1, colorBot);
+  ctx.fillStyle = g;
+  roundRect(ctx, cx-bw/2, cy-bh/2, bw, bh, 8);
+  ctx.fill();
+  ctx.font = 'bold 22px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, cx, cy);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawCenteredText(text, x, y, color, size) {
+  ctx.font = `${size}px Arial`;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.fillText(text, x, y);
+}
+
+// ─── Helper: roundRect path ───────────────────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + (Array.isArray(r) ? r[0] : r), y);
+  ctx.lineTo(x + w - (Array.isArray(r) ? r[1] : r), y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y + (Array.isArray(r) ? r[1] : r));
+  ctx.lineTo(x+w, y+h - (Array.isArray(r) ? r[2] : r));
+  ctx.quadraticCurveTo(x+w, y+h, x+w-(Array.isArray(r)?r[2]:r), y+h);
+  ctx.lineTo(x+(Array.isArray(r)?r[3]:r), y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-(Array.isArray(r)?r[3]:r));
+  ctx.lineTo(x, y+(Array.isArray(r)?r[0]:r));
+  ctx.quadraticCurveTo(x, y, x+(Array.isArray(r)?r[0]:r), y);
+  ctx.closePath();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════════════════
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (W / rect.width);
+});
+
+canvas.addEventListener('click', () => handleAction());
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ') { e.preventDefault(); handleAction(); }
+  if (e.key === 'p' || e.key === 'P') {
+    if (state === 'playing') state = 'paused';
+    else if (state === 'paused') state = 'playing';
+  }
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Touch support
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+}, { passive: false });
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+  handleAction();
+}, { passive: false });
+
+function handleAction() {
+  if (state === 'menu') {
+    initGame();
+  } else if (state === 'playing' && !launched) {
+    launched = true;
+    const spd = LEVEL_DATA[levelIdx].speed;
+    ball.vx = (Math.random() < 0.5 ? -1 : 1) * spd * 0.4;
+    ball.vy = -Math.sqrt(spd*spd - ball.vx*ball.vx);
+  } else if (state === 'paused') {
+    state = 'playing';
+  } else if (state === 'levelclear') {
+    levelIdx++;
+    initLevel();
+    state = 'playing';
+    updateHUD();
+  } else if (state === 'gameover' || state === 'win') {
+    initGame();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  HUD
+// ═══════════════════════════════════════════════════════════════════
+function updateHUD() {
+  document.getElementById('score-val').textContent   = score.toLocaleString();
+  document.getElementById('level-val').textContent   = `${levelIdx+1} / ${TOTAL_LEVELS}`;
+  document.getElementById('lives-val').textContent   = '♥'.repeat(lives) + '♡'.repeat(MAX_LIVES - lives);
+  document.getElementById('hiscore-val').textContent = Math.max(score, highScore).toLocaleString();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LOOP
+// ═══════════════════════════════════════════════════════════════════
+state = 'menu';
+updateHUD();
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
