@@ -180,14 +180,16 @@ const LEVEL_DATA = [
 // ═══════════════════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════════════════
-let state, score, highScore, lives, levelIdx;
-let bricks, ball, padX, padW;
-let launched;
+let state = 'menu';
+let score = 0;
+let lives = MAX_LIVES;
+let levelIdx = 0;
+let highScore = parseInt(localStorage.getItem('bbHigh') || '0');
+let bricks = [], ball = null, padX = W / 2 - 50, padW = 100;
+let launched = false;
 let particles = [];
 let keys = {};
 let mouseX = W / 2;
-
-highScore = parseInt(localStorage.getItem('bbHigh') || '0');
 
 // ═══════════════════════════════════════════════════════════════════
 //  INIT
@@ -659,7 +661,6 @@ function updateHUD() {
 // ═══════════════════════════════════════════════════════════════════
 //  LOOP
 // ═══════════════════════════════════════════════════════════════════
-state = 'menu';
 updateHUD();
 
 function loop() {
